@@ -43,7 +43,7 @@ func main() {
 	defer os.RemoveAll(tempDir)
 
 	vaultDataDir := filepath.Join(tempDir, "vault-data")
-	os.MkdirAll(vaultDataDir, 0755)
+	os.MkdirAll(vaultDataDir, 0o755)
 
 	// Create Vault configuration file
 	configPath := filepath.Join(tempDir, "vault.hcl")
@@ -61,7 +61,7 @@ listener "tcp" {
 # CACHE_BACKEND=redis for Redis, or omit for LRU
 `, vaultDataDir)
 
-	err = os.WriteFile(configPath, []byte(configContent), 0644)
+	err = os.WriteFile(configPath, []byte(configContent), 0o644)
 	if err != nil {
 		log.Fatalf("Failed to write config file: %v", err)
 	}
