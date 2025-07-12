@@ -1,6 +1,3 @@
-// Copyright (c) HashiCorp, Inc.
-// SPDX-License-Identifier: MPL-2.0
-
 package cache
 
 // NewCacheBackend creates a cache backend based on environment variables
