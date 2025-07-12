@@ -173,7 +173,7 @@ func newCache(b Backend, size int, logger log.Logger, metricSink metrics.MetricS
 	pm := pathmanager.New()
 	pm.AddPaths(cacheExceptionsPaths)
 
-	cacheBackend := createCacheBackendFromEnv(size, logger)
+	cacheBackend := createCacheBackend(size, logger)
 	c := &cache{
 		backend:      b,
 		size:         size,
@@ -457,18 +457,8 @@ func (c *cacheTransaction) Rollback(ctx context.Context) error {
 	return nil
 }
 
-// NewDefaultCacheBackend creates the default cache backend implementation
-func NewDefaultCacheBackend(size int) CacheBackend {
-	genericCache, err := helpercache.NewCacheBackend[string, *Entry](size)
-	if err != nil {
-		// Fallback to a reasonable size if the requested size fails
-		genericCache, _ = helpercache.NewCacheBackend[string, *Entry](DefaultCacheSize)
-	}
-	return &cacheBackendAdapter{cache: genericCache}
-}
-
-// createCacheBackendFromEnv creates a cache backend based on environment variable
-func createCacheBackendFromEnv(size int, logger log.Logger) CacheBackend {
+// createCacheBackend creates a cache backend using the helper cache
+func createCacheBackend(size int, logger log.Logger) CacheBackend {
 	genericCache, err := helpercache.NewCacheBackend[string, *Entry](size)
 	if err != nil {
 		logger.Warn("failed to create cache backend, falling back to no cache", "error", err)
