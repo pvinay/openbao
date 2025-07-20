@@ -26,7 +26,7 @@ RUN groupadd ${NAME} && useradd -r -g ${NAME} ${NAME}
 
 ARG EXTRA_PACKAGES
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends wget libcap2-bin dumb-init tzdata ${EXTRA_PACKAGES} && \
+    apt-get install -y --no-install-recommends git wget libcap2-bin dumb-init tzdata ${EXTRA_PACKAGES} && \
     rm -rf /var/lib/apt/lists/*
 
 # golang 1.23
