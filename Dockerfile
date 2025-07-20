@@ -34,7 +34,7 @@ WORKDIR /tmp
 
 RUN wget --no-check-certificate https://go.dev/dl/go1.24.5.linux-amd64.tar.gz 
 RUN rm -rf /usr/local/go
-RUN tar -xvzf go1.24.5.linux-amd64.tar.gz -C /usr/local/
+RUN tar -xzf go1.24.5.linux-amd64.tar.gz -C /usr/local/
 #RUN cp go/bin/go /usr/local/bin/go 
 
 RUN echo "export GO_ROOT=/usr/local/go" >> ~/.bashrc
