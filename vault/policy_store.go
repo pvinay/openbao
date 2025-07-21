@@ -16,9 +16,9 @@ import (
 	"github.com/armon/go-metrics"
 	log "github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/go-secure-stdlib/strutil"
-	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/openbao/openbao/helper/identity"
 	"github.com/openbao/openbao/helper/namespace"
+	"github.com/openbao/openbao/sdk/v2/helper/cache"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
@@ -153,7 +153,7 @@ var (
 type PolicyStore struct {
 	core *Core
 
-	tokenPoliciesLRU *lru.TwoQueueCache[string, *Policy]
+	tokenPoliciesCache cache.CacheBackend[string, *Policy]
 
 	// This is used to ensure that writes to the store (acl) or to the egp
 	// path tree don't happen concurrently. We are okay reading stale data so
@@ -189,8 +189,12 @@ func NewPolicyStore(ctx context.Context, core *Core, baseView BarrierView, syste
 	}
 
 	if !system.CachingDisabled() {
-		cache, _ := lru.New2Q[string, *Policy](policyCacheSize)
-		ps.tokenPoliciesLRU = cache
+		cacheBackend, err := cache.NewCacheBackend[string, *Policy](policyCacheSize)
+		if err != nil {
+			logger.Warn("failed to create cache backend, falling back to no cache", "error", err)
+		} else {
+			ps.tokenPoliciesCache = cacheBackend
+		}
 	}
 
 	aclView := ps.getACLView(namespace.RootNamespace)
@@ -255,8 +259,8 @@ func (ps *PolicyStore) invalidate(ctx context.Context, name string, policyType P
 	// can happen is we load again if something since added it
 	switch policyType {
 	case PolicyTypeACL:
-		if ps.tokenPoliciesLRU != nil {
-			ps.tokenPoliciesLRU.Remove(index)
+		if ps.tokenPoliciesCache != nil {
+			ps.tokenPoliciesCache.Remove(index)
 		}
 
 	default:
@@ -361,8 +365,8 @@ func (ps *PolicyStore) setPolicyInternal(ctx context.Context, p *Policy, casVers
 
 		ps.policyTypeMap.Store(index, PolicyTypeACL)
 
-		if ps.tokenPoliciesLRU != nil {
-			ps.tokenPoliciesLRU.Add(index, p)
+		if ps.tokenPoliciesCache != nil {
+			ps.tokenPoliciesCache.Set(index, p)
 		}
 	default:
 		return errors.New("unknown policy type, cannot set")
@@ -423,15 +427,15 @@ func (ps *PolicyStore) switchedGetPolicy(ctx context.Context, name string, polic
 	name = ps.sanitizeName(name)
 	index := ps.cacheKey(ns, name)
 
-	var cache *lru.TwoQueueCache[string, *Policy]
+	var cache cache.CacheBackend[string, *Policy]
 	var view BarrierView
 
 	switch policyType {
 	case PolicyTypeACL:
-		cache = ps.tokenPoliciesLRU
+		cache = ps.tokenPoliciesCache
 		view = ps.getACLView(ns)
 	case PolicyTypeToken:
-		cache = ps.tokenPoliciesLRU
+		cache = ps.tokenPoliciesCache
 		val, ok := ps.policyTypeMap.Load(index)
 		if !ok {
 			// Doesn't exist
@@ -471,7 +475,7 @@ func (ps *PolicyStore) switchedGetPolicy(ctx context.Context, name string, polic
 			namespace: namespace.RootNamespace,
 		}
 		if cache != nil {
-			cache.Add(index, p)
+			cache.Set(index, p)
 		}
 		return p, nil
 	}
@@ -567,7 +571,7 @@ func (ps *PolicyStore) switchedGetPolicy(ctx context.Context, name string, polic
 
 	if cache != nil {
 		// Update the LRU cache
-		cache.Add(index, policy)
+		cache.Set(index, policy)
 	}
 
 	return policy, nil
@@ -665,9 +669,9 @@ func (ps *PolicyStore) switchedDeletePolicy(ctx context.Context, name string, po
 			}
 		}
 
-		if ps.tokenPoliciesLRU != nil {
+		if ps.tokenPoliciesCache != nil {
 			// Clear the cache
-			ps.tokenPoliciesLRU.Remove(index)
+			ps.tokenPoliciesCache.Remove(index)
 		}
 
 		ps.policyTypeMap.Delete(index)

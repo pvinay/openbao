@@ -10,7 +10,7 @@ import (
 
 	metrics "github.com/armon/go-metrics"
 	log "github.com/hashicorp/go-hclog"
-	lru "github.com/hashicorp/golang-lru/v2"
+	helpercache "github.com/openbao/openbao/sdk/v2/helper/cache"
 	"github.com/openbao/openbao/sdk/v2/helper/locksutil"
 	"github.com/openbao/openbao/sdk/v2/helper/pathmanager"
 )
@@ -45,9 +45,53 @@ var cacheExceptionsPaths = []string{
 }
 
 // CacheRefreshContext returns a context with an added value denoting if the
-// cache should attempt a refresh.
+// cache should be refreshed.
 func CacheRefreshContext(ctx context.Context, r bool) context.Context {
 	return context.WithValue(ctx, refreshCacheCtxKey, r)
+}
+
+// CacheBackend defines the interface for different cache implementations
+// This is now an adapter that wraps the generic helper cache
+type CacheBackend interface {
+	// Get retrieves an entry from the cache by key
+	Get(key string) (*Entry, bool)
+
+	// Set stores an entry in the cache
+	Set(key string, entry *Entry)
+
+	// Remove removes an entry from the cache by key
+	Remove(key string)
+
+	// Purge clears all entries from the cache
+	Purge()
+
+	// Len returns the number of entries in the cache
+	Len() int
+}
+
+// cacheBackendAdapter adapts the generic helper cache to the physical cache interface
+type cacheBackendAdapter struct {
+	cache helpercache.CacheBackend[string, *Entry]
+}
+
+func (a *cacheBackendAdapter) Get(key string) (*Entry, bool) {
+	return a.cache.Get(key)
+}
+
+func (a *cacheBackendAdapter) Set(key string, entry *Entry) {
+	a.cache.Set(key, entry)
+}
+
+func (a *cacheBackendAdapter) Remove(key string) {
+	a.cache.Remove(key)
+}
+
+func (a *cacheBackendAdapter) Purge() {
+	a.cache.Purge()
+}
+
+func (a *cacheBackendAdapter) Len() int {
+	return a.cache.Len()
 }
 
 // cacheRefreshFromContext is a helper to look up if the provided context is
@@ -77,7 +121,7 @@ type TransactionalCache interface {
 type cache struct {
 	backend         Backend
 	size            int
-	lru             *lru.TwoQueueCache[string, *Entry]
+	cacheBackend    CacheBackend
 	locks           []*locksutil.LockEntry
 	logger          log.Logger
 	enabled         *uint32
@@ -129,13 +173,13 @@ func newCache(b Backend, size int, logger log.Logger, metricSink metrics.MetricS
 	pm := pathmanager.New()
 	pm.AddPaths(cacheExceptionsPaths)
 
-	lruCache, _ := lru.New2Q[string, *Entry](size)
+	cacheBackend := createCacheBackend(size, logger)
 	c := &cache{
-		backend: b,
-		size:    size,
-		lru:     lruCache,
-		locks:   locksutil.CreateLocks(),
-		logger:  logger,
+		backend:      b,
+		size:         size,
+		cacheBackend: cacheBackend,
+		locks:        locksutil.CreateLocks(),
+		logger:       logger,
 		// This fails safe.
 		enabled:         new(uint32),
 		cacheExceptions: pm,
@@ -181,7 +225,7 @@ func (c *cache) Purge(ctx context.Context) {
 		defer lock.Unlock()
 	}
 
-	c.lru.Purge()
+	c.cacheBackend.Purge()
 }
 
 // modifications to this function should also be applied to cacheTransaction.
@@ -210,7 +254,7 @@ func (c *cache) Put(ctx context.Context, entry *Entry) error {
 			cacheEntry.ValueHash = make([]byte, len(entry.ValueHash))
 			copy(cacheEntry.ValueHash, entry.ValueHash)
 		}
-		c.lru.Add(entry.Key, cacheEntry)
+		c.cacheBackend.Set(entry.Key, cacheEntry)
 		c.metricSink.IncrCounter([]string{"cache", "write"}, 1)
 	}
 	return err
@@ -225,9 +269,9 @@ func (c *cache) Get(ctx context.Context, key string) (*Entry, error) {
 	lock.RLock()
 	defer lock.RUnlock()
 
-	// Check the LRU first
+	// Check the cache first
 	if !cacheRefreshFromContext(ctx) {
-		if raw, ok := c.lru.Get(key); ok {
+		if raw, ok := c.cacheBackend.Get(key); ok {
 			if raw == nil {
 				return nil, nil
 			}
@@ -244,7 +288,7 @@ func (c *cache) Get(ctx context.Context, key string) (*Entry, error) {
 	}
 
 	// Cache the result, even if nil
-	c.lru.Add(key, ent)
+	c.cacheBackend.Set(key, ent)
 
 	return ent, nil
 }
@@ -261,7 +305,7 @@ func (c *cache) Delete(ctx context.Context, key string) error {
 
 	err := c.backend.Delete(ctx, key)
 	if err == nil {
-		c.lru.Remove(key)
+		c.cacheBackend.Remove(key)
 	}
 	return err
 }
@@ -346,7 +390,7 @@ func (c *cacheTransaction) Put(ctx context.Context, entry *Entry) error {
 			cacheEntry.ValueHash = make([]byte, len(entry.ValueHash))
 			copy(cacheEntry.ValueHash, entry.ValueHash)
 		}
-		c.lru.Add(entry.Key, cacheEntry)
+		c.cacheBackend.Set(entry.Key, cacheEntry)
 		c.modifiedLock.Lock()
 		c.modified[entry.Key] = struct{}{}
 		c.modifiedLock.Unlock()
@@ -370,7 +414,7 @@ func (c *cacheTransaction) Delete(ctx context.Context, key string) error {
 		c.modified[key] = struct{}{}
 		c.modifiedLock.Unlock()
 
-		c.lru.Remove(key)
+		c.cacheBackend.Remove(key)
 	}
 	return err
 }
@@ -394,7 +438,7 @@ func (c *cacheTransaction) Commit(ctx context.Context) error {
 			lock.Lock()
 			defer lock.Unlock()
 
-			c.parent.(*transactionalCache).lru.Remove(key)
+			c.parent.(*transactionalCache).cacheBackend.Remove(key)
 		}()
 	}
 	c.modifiedLock.Unlock()
@@ -411,4 +455,14 @@ func (c *cacheTransaction) Rollback(ctx context.Context) error {
 	// the underlying storage at all.
 
 	return nil
+}
+
+// createCacheBackend creates a cache backend using the helper cache
+func createCacheBackend(size int, logger log.Logger) CacheBackend {
+	genericCache, err := helpercache.NewCacheBackend[string, *Entry](size)
+	if err != nil {
+		logger.Warn("failed to create cache backend, falling back to no cache", "error", err)
+		return nil
+	}
+	return &cacheBackendAdapter{cache: genericCache}
 }

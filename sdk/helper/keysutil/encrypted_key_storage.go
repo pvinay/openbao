@@ -12,7 +12,7 @@ import (
 	"sort"
 	"strings"
 
-	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/openbao/openbao/sdk/v2/helper/cache"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
@@ -96,7 +96,7 @@ func NewEncryptedKeyStorageWrapper(config EncryptedKeyStorageConfig) (*Encrypted
 		size = DefaultCacheSize
 	}
 
-	cache, err := lru.New2Q[string, string](size)
+	cacheBackend, err := cache.NewCacheBackend[string, string](size)
 	if err != nil {
 		return nil, err
 	}
@@ -104,13 +104,13 @@ func NewEncryptedKeyStorageWrapper(config EncryptedKeyStorageConfig) (*Encrypted
 	return &EncryptedKeyStorageWrapper{
 		policy: config.Policy,
 		prefix: config.Prefix,
-		lru:    cache,
+		cache:  cacheBackend,
 	}, nil
 }
 
 type EncryptedKeyStorageWrapper struct {
 	policy *Policy
-	lru    *lru.TwoQueueCache[string, string]
+	cache  cache.CacheBackend[string, string]
 	prefix string
 }
 
@@ -119,7 +119,7 @@ func (f *EncryptedKeyStorageWrapper) Wrap(s logical.Storage) logical.Storage {
 		policy: f.policy,
 		s:      s,
 		prefix: f.prefix,
-		lru:    f.lru,
+		cache:  f.cache,
 	}
 
 	if _, ok := s.(logical.TransactionalStorage); ok {
@@ -136,7 +136,7 @@ func (f *EncryptedKeyStorageWrapper) Wrap(s logical.Storage) logical.Storage {
 type encryptedKeyStorage struct {
 	policy *Policy
 	s      logical.Storage
-	lru    *lru.TwoQueueCache[string, string]
+	cache  cache.CacheBackend[string, string]
 
 	prefix string
 }
@@ -196,7 +196,7 @@ func (s *encryptedKeyStorage) ListPage(ctx context.Context, prefix string, after
 	context := []byte(paths.Join(s.prefix, prefix))
 
 	for i, k := range keys {
-		raw, ok := s.lru.Get(k)
+		raw, ok := s.cache.Get(k)
 		if ok {
 			// cache HIT, we can bail early and skip the decode & decrypt operations.
 			decryptedKeys[i] = raw
@@ -239,7 +239,7 @@ func (s *encryptedKeyStorage) ListPage(ctx context.Context, prefix string, after
 
 		// We want to store the unencoded version of the key in the cache.
 		// This will make it more performent when it's a HIT.
-		s.lru.Add(k, plaintext)
+		s.cache.Set(k, plaintext)
 
 		decryptedKeys[i] = plaintext
 	}
@@ -343,7 +343,7 @@ func (t *transactionalEncryptedKeyStorage) BeginReadOnlyTx(ctx context.Context) 
 		encryptedKeyStorage{
 			policy: t.encryptedKeyStorage.policy,
 			s:      tx,
-			lru:    t.encryptedKeyStorage.lru,
+			cache:  t.encryptedKeyStorage.cache,
 			prefix: t.encryptedKeyStorage.prefix,
 		},
 	}, nil
@@ -359,7 +359,7 @@ func (t *transactionalEncryptedKeyStorage) BeginTx(ctx context.Context) (logical
 		encryptedKeyStorage{
 			policy: t.encryptedKeyStorage.policy,
 			s:      tx,
-			lru:    t.encryptedKeyStorage.lru,
+			cache:  t.encryptedKeyStorage.cache,
 			prefix: t.encryptedKeyStorage.prefix,
 		},
 	}, nil
