@@ -40,6 +40,9 @@ RUN tar -xzf go1.24.5.linux-amd64.tar.gz -C /usr/local/
 RUN echo "export GO_ROOT=/usr/local/go" >> ~/.bashrc
 RUN echo "export PATH=/usr/local/go/bin:$PATH" >> ~/.bashrc
 
+ENV GO_ROOT=/usr/local/go
+ENV PATH="/usr/local/go/bin:$PATH"
+
 RUN cp /usr/local/go/bin/go /usr/local/bin/go
 
 # Reset working dir to repo base
