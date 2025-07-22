@@ -14,7 +14,7 @@ RUN rm -rf /usr/local/go
 RUN tar -xzf go1.24.5.linux-amd64.tar.gz -C /usr/local/
 RUN cp /usr/local/go/bin/go /usr/local/bin/go
 
-ENV GO_ROOT=/usr/local/go
+ENV GOROOT=/usr/local/go
 ENV PATH="/usr/local/go/bin:$PATH"
 
 WORKDIR /root/repo/openbao
