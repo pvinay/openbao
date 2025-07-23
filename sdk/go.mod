@@ -49,6 +49,7 @@ require (
 	github.com/openbao/go-kms-wrapping/v2 v2.4.1-0.20250606024053-86fbd91248d1
 	github.com/openbao/openbao/api/v2 v2.3.0
 	github.com/pierrec/lz4 v2.6.1+incompatible
+	github.com/redis/go-redis/v9 v9.11.0
 	github.com/ryanuber/go-glob v1.0.0
 	github.com/stretchr/testify v1.10.0
 	github.com/tink-crypto/tink-go/v2 v2.4.0
@@ -73,8 +74,10 @@ require (
 	github.com/Azure/go-ansiterm v0.0.0-20230124172434-306776ec8161 // indirect
 	github.com/Azure/go-ntlmssp v0.0.0-20221128193559-754e69321358 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
+	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/containerd/log v0.1.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
+	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/fatih/color v1.18.0 // indirect
